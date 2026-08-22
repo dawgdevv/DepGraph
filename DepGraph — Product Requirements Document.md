@@ -75,6 +75,7 @@ Users must not need to understand graph databases or Cypher. Graph technology is
 - Direct and transitive dependency traversal.
 - Dependency path inspection.
 - Blast-radius counts and visualization.
+- File-level import reachability for JavaScript/TypeScript source files.
 - Package and vulnerability detail panels.
 - Loading, empty, and error states.
 - Polished desktop-first responsive UI.
@@ -257,12 +258,60 @@ type VulnerabilityFinding = {
 
 Exact fields must follow the CVE-Lite output available during implementation.
 
+### File-level reachability
+
+File-level reachability maps repository source files to imported packages. It does not trace function calls or prove runtime execution.
+
+Parse JavaScript/TypeScript imports such as:
+
+```ts
+import axios from "axios";
+const axios = require("axios");
+await import("axios");
+```
+
+Normalize each import into:
+
+```ts
+type FileImport = {
+  filePath: string;
+  packageName: string;
+  importType: "static" | "require" | "dynamic";
+  line: number;
+};
+```
+
+File-level graph relationships:
+
+```text
+(:Project)-[:CONTAINS]->(:File)
+(:File)-[:IMPORTS]->(:Package)
+(:File)-[:IMPORTS_FILE]->(:File)
+```
+
+Example:
+
+```text
+Project
+  -> src/api/client.ts
+    -> axios@1.8.4
+      -> follow-redirects@1.15.9
+        -> Vulnerability
+```
+
+The source analyzer should resolve relative imports and common TypeScript extensions where practical. It may report files that directly import a vulnerable package or import a package that leads to one through the dependency graph.
+
+This feature must be labeled **file-level import reachability**. It must not claim that vulnerable code executes. Dynamic imports, aliases, generated code, dead code, runtime configuration, and framework behavior can make static results incomplete.
+
 ## 8. Graph Model
 
 Core model:
 
 ```text
 (:Project)-[:DEPENDS_ON]->(:Package)
+(:Project)-[:CONTAINS]->(:File)
+(:File)-[:IMPORTS]->(:Package)
+(:File)-[:IMPORTS_FILE]->(:File)
 (:Package)-[:DEPENDS_ON]->(:Package)
 (:Package)-[:HAS_VULNERABILITY]->(:Vulnerability)
 ```
@@ -297,6 +346,11 @@ Required operations:
 - **Dependency paths:** What paths connect project X to package Y?
 - **Blast radius:** What packages are reachable by reverse traversal from vulnerable package X?
 - **Multi-hop traversal:** Demonstrate paths of at least two hops.
+
+File-level operations:
+
+- Files that directly import a selected package.
+- Files that import packages with a dependency path to a selected vulnerable package.
 
 Reverse dependency search must support filters:
 
@@ -474,6 +528,11 @@ MVP is complete when a user can:
 - Display direct, transitive, and total path counts.
 - Inspect individual project-to-vulnerability paths.
 
+### File reachability
+
+- Display source files that import the vulnerable package or an affected dependency.
+- Label results as file-level import reachability, not execution proof.
+
 ### Reliability and UX
 
 - Handle invalid repositories, missing files, CVE-Lite failures, and CognoDB outages gracefully.
@@ -514,7 +573,6 @@ CognoDB directly models `DEPENDS_ON` and supports arbitrary reverse, multi-hop t
 Only consider after MVP:
 
 - Function-level reachability.
-- Source-code import graph.
 - Additional package managers.
 - GitHub PR and CI/CD integration.
 - Remediation and upgrade recommendations.

@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# DepGraph
 
-## Getting Started
+DepGraph shows why a vulnerable npm dependency affects a repository and how it reaches the application.
 
-First, run the development server:
+It combines vulnerability findings from **CVE-Lite** with dependency relationships stored in **CognoDB**. Developers can inspect direct and transitive paths, affected packages, and the potential blast radius of each finding.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## How It Works
+
+```text
+Repository ZIP or public GitHub URL
+  -> Validate package.json and package-lock.json
+  -> Parse the resolved npm dependency tree
+  -> Detect vulnerable packages with CVE-Lite
+  -> Store dependency relationships in CognoDB
+  -> Trace paths from the project to each vulnerable package
+  -> Show the blast radius in an interactive graph
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+For example, instead of only reporting `follow-redirects@1.15.9` as vulnerable, DepGraph explains how it enters the project:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```text
+my-app -> api-client -> axios -> follow-redirects [vulnerable]
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+DepGraph explains impact; it does not replace a vulnerability scanner, modify dependencies, or automatically remediate findings.
 
-## Learn More
+## Development
 
-To learn more about Next.js, take a look at the following resources:
+Requirements: Node.js and npm.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm install
+npm run dev
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Open <http://localhost:3000>.
 
-## Deploy on Vercel
+Other commands:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run lint
+npm run build
+npm start
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Built with Next.js, React, TypeScript, and Tailwind CSS. CVE-Lite and CognoDB integration is planned as part of the MVP and is not implemented in the current scaffold.
