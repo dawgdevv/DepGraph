@@ -5,7 +5,7 @@ import {
   getAnalysis,
   updateAnalysis,
   type AnalysisStats,
-} from "@/lib/analysis-store";
+} from "./store";
 import { cloneRepository } from "./repository/clone";
 import { validateRepository, ValidationError } from "./validate";
 import { parseLockfile } from "./parse-lockfile";
@@ -93,16 +93,20 @@ export async function runAnalysis(analysisId: string): Promise<void> {
 
     const fileImports = await fileImportsPromise;
 
-    // 6. Write graph (Step 5 stub)
+    // 6. Write graph (CognoDB)
     updateAnalysis(analysisId, { status: "building_graph" });
+    let affectedPaths = 0;
     try {
-      await writeGraph({
+      const res = await writeGraph({
         analysisId,
         projectName: projectNameFromRepoPath(repoPath),
+        repositoryUrl,
+        repoPath,
         packages: lockResult.packages,
         vulnerabilities,
         fileImports,
       });
+      affectedPaths = res.affectedPaths;
     } catch (e) {
       // CognoDB unavailable copy per PRD §11
       const msg =
@@ -122,8 +126,7 @@ export async function runAnalysis(analysisId: string): Promise<void> {
       direct: lockResult.directCount,
       transitive: lockResult.transitiveCount,
       vulnerable: vulnerabilities.length,
-      // affected paths requires graph traversal; placeholder until Step 5 computes it
-      affectedPaths: 0,
+      affectedPaths,
     };
 
     updateAnalysis(analysisId, {

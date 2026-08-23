@@ -1,8 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
-import type { Analysis, GraphEdge, GraphNode, Vulnerability } from "@/lib/demo-data";
-import { dependentsOf, dependenciesOf, filesImporting } from "@/lib/demo-data";
+import type { Analysis, GraphEdge, GraphNode, Vulnerability } from "@/lib/graph";
+import { dependentsOf, dependenciesOf, filesImporting } from "@/lib/graph";
 
 type Highlight = { nodes: Set<string>; edges: Set<string> };
 
@@ -19,63 +19,135 @@ export function LeftPanel({
 }) {
   const q = query.trim().toLowerCase();
   const packages = analysis.nodes.filter((n) => n.kind === "package");
-  const matches = q
+  const fileNodes = analysis.nodes.filter((n) => n.kind === "file");
+  const packageMatches = q
     ? packages.filter(
         (p) =>
           p.label.toLowerCase().includes(q) ||
-          (p.sub ?? "").toLowerCase().includes(q)
+          (p.sub ?? "").toLowerCase().includes(q) ||
+          p.id.toLowerCase().includes(q)
       )
     : [];
+  const vulnMatches = q
+    ? analysis.vulnerabilities.filter(
+        (v) =>
+          v.packageName.toLowerCase().includes(q) ||
+          v.identifier.toLowerCase().includes(q) ||
+          v.version.toLowerCase().includes(q) ||
+          v.severity.toLowerCase().includes(q)
+      )
+    : [];
+  // file search: match file path or imported package name
+  const fileMatches = q
+    ? (() => {
+        const seen = new Set<string>();
+        const out: Array<{ id: string; label: string; pkgName: string; line: number }> = [];
+        // from file nodes
+        for (const fn of fileNodes) {
+          if (fn.label.toLowerCase().includes(q)) {
+            // find one import for sub display
+            const imp = analysis.fileImports.find((fi) => fi.file === fn.label);
+            const key = fn.id;
+            if (!seen.has(key)) {
+              seen.add(key);
+              out.push({ id: fn.id, label: fn.label, pkgName: imp?.pkgName ?? "", line: imp?.line ?? 0 });
+            }
+          }
+        }
+        // also from fileImports directly (covers when file nodes not yet created)
+        for (const fi of analysis.fileImports) {
+          if (fi.file.toLowerCase().includes(q) || fi.pkgName.toLowerCase().includes(q)) {
+            const fid = analysis.nodes.find((n) => n.kind === "file" && n.label === fi.file)?.id ?? `file:${fi.file}`;
+            if (!seen.has(fid)) {
+              seen.add(fid);
+              out.push({ id: fid, label: fi.file, pkgName: fi.pkgName, line: fi.line });
+            }
+          }
+        }
+        return out;
+      })()
+    : [];
+  const totalMatches = packageMatches.length + vulnMatches.length + fileMatches.length;
 
   return (
     <aside className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface">
       <div className="border-b border-line px-4 py-3">
         <h2 className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">
-          {q ? `Results · ${matches.length}` : `Vulnerable packages · ${analysis.vulnerabilities.length}`}
+          {q
+            ? `Results · ${totalMatches} (${packageMatches.length} pkg · ${vulnMatches.length} vuln · ${fileMatches.length} file)`
+            : `Vulnerable packages · ${analysis.vulnerabilities.length}`}
         </h2>
+        {q && (
+          <p className="mt-1 font-mono text-[10px] text-faint">
+            Search packages, vulns, files — click to focus graph. For compromised pkg, view blast radius in details.
+          </p>
+        )}
       </div>
 
       {q && (
         <div className="border-b border-line pb-2">
-          {matches.length === 0 ? (
+          {totalMatches === 0 ? (
             <p className="px-4 py-4 text-xs leading-relaxed text-muted">
-              No packages match “{query.trim()}”.
+              No match for “{query.trim()}”. Try package name, file path, or CVE id.
             </p>
           ) : (
-            matches.map((p) => {
-              const vuln = analysis.vulnerabilities.find(
-                (v) => v.packageName === p.label
-              );
-              return (
-                <button
-                  key={p.id}
-                  onClick={() => onSelectPackage(p.id)}
-                  className={`flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-bg ${
-                    selectedId === p.id ? "bg-link-soft" : ""
-                  }`}
-                >
-                  <span>
-                    <span className="block font-mono text-[12.5px] font-medium text-ink">
-                      {p.label}
-                    </span>
-                    <span className="block font-mono text-[10.5px] text-faint">
-                      v{p.sub} · {p.isDirect ? "direct" : "transitive"}
-                    </span>
-                  </span>
-                  {vuln && (
-                    <span
-                      className={`px-1.5 py-0.5 font-mono text-[9.5px] font-medium uppercase ${
-                        vuln.severity === "high"
-                          ? "bg-accent text-white"
-                          : "bg-accent-soft text-accent-ink"
-                      }`}
+            <>
+              {packageMatches.length > 0 && (
+                <div>
+                  <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-wide text-faint">Packages · {packageMatches.length}</p>
+                  {packageMatches.map((p) => {
+                    const vuln = analysis.vulnerabilities.find((v) => v.packageName === p.label);
+                    return (
+                      <button
+                        key={p.id}
+                        onClick={() => onSelectPackage(p.id)}
+                        className={`flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-bg ${selectedId === p.id ? "bg-link-soft" : ""}`}
+                      >
+                        <span>
+                          <span className="block font-mono text-[12.5px] font-medium text-ink">{p.label}</span>
+                          <span className="block font-mono text-[10.5px] text-faint">v{p.sub} · {p.isDirect ? "direct" : "transitive"}</span>
+                        </span>
+                        {vuln && <span className={`px-1.5 py-0.5 font-mono text-[9.5px] font-medium uppercase ${vuln.severity === "high" ? "bg-accent text-white" : "bg-accent-soft text-accent-ink"}`}>{vuln.severity}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {vulnMatches.length > 0 && (
+                <div className="border-t border-line/60">
+                  <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-wide text-faint">Vulnerabilities · {vulnMatches.length}</p>
+                  {vulnMatches.map((v) => (
+                    <button
+                      key={v.key}
+                      onClick={() => onSelectPackage(v.key)}
+                      className={`flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-bg ${selectedId === v.key ? "bg-accent-soft/60" : ""}`}
                     >
-                      {vuln.severity}
-                    </span>
-                  )}
-                </button>
-              );
-            })
+                      <span>
+                        <span className="block font-mono text-[12.5px] font-medium text-ink">{v.identifier}</span>
+                        <span className="block font-mono text-[10.5px] text-faint">{v.packageName}@{v.version}</span>
+                      </span>
+                      <span className={`px-1.5 py-0.5 font-mono text-[9.5px] font-medium uppercase ${v.severity === "high" ? "bg-accent text-white" : "bg-accent-soft text-accent-ink"}`}>{v.severity}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {fileMatches.length > 0 && (
+                <div className="border-t border-line/60">
+                  <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-wide text-faint">Files · {fileMatches.length}</p>
+                  {fileMatches.map((f) => (
+                    <button
+                      key={f.id}
+                      onClick={() => onSelectPackage(f.id)}
+                      className={`flex w-full flex-col px-4 py-2 text-left hover:bg-bg ${selectedId === f.id ? "bg-link-soft" : ""}`}
+                    >
+                      <span className="block truncate font-mono text-[12px] text-ink">{f.label}</span>
+                      <span className="block font-mono text-[10.5px] text-faint">→ {f.pkgName} L{f.line}</span>
+                    </button>
+                  ))}
+                  <p className="px-4 py-1 font-mono text-[10px] text-faint">File → Package → Vulnerability. Select file to see its imports and reachability.</p>
+                </div>
+              )}
+            </>
           )}
         </div>
       )}
@@ -237,6 +309,12 @@ function DetailBody({
   if (node.kind === "vuln") {
     const v = analysis.vulnerabilities.find((x) => x.key === node.id);
     if (!v) return null;
+    const pkgNode = analysis.nodes.find((n) => n.label === v.packageName);
+    const blastPkgIds = v.blastRadius.pathNodeIds.length
+      ? [...new Set(v.blastRadius.pathNodeIds.flat().filter((id) => analysis.nodes.some((n) => n.id === id && n.kind === "package")))]
+      : [];
+    const fileSearchIds = [pkgNode?.id, ...blastPkgIds].filter(Boolean) as string[];
+    const files = filesImporting(analysis, fileSearchIds.length ? fileSearchIds : [v.packageName]);
     return (
       <div className="px-5 py-4">
         <KindTag>Vulnerability</KindTag>
@@ -245,32 +323,82 @@ function DetailBody({
           <SeverityBadge severity={v.severity} />
         </div>
         <p className="mt-0.5 font-mono text-xs text-muted">
-          {v.packageName}@{v.version}
+          {v.packageName}@{v.version} {v.relationship ? `· ${v.relationship}` : ""}
         </p>
+        {v.summary && <p className="mt-3 text-xs leading-relaxed text-muted">{v.summary}</p>}
         <dl className="mt-4 space-y-2.5 border-t border-line pt-4 font-mono text-xs">
-          <Row k="affected range" v={v.affectedRange} />
+          <Row k="affected range" v={v.affectedRange || "unknown"} />
+          {v.fixVersion && <Row k="fixed in" v={v.fixVersion} accent />}
+          <Row k="primary parent" v={v.primaryParent ?? "—"} />
+          <Row k="relationship" v={v.relationship ?? "transitive"} />
           <Row k="detected by" v="CVE-Lite" />
         </dl>
-        <h4 className="mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">
-          Blast radius
-        </h4>
+        {v.cves && v.cves.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {v.cves.map((c) => (
+              <span key={c} className="border border-line-strong bg-bg px-1.5 py-0.5 font-mono text-[10px] text-muted">{c}</span>
+            ))}
+          </div>
+        )}
+        <h4 className="mt-5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">Blast radius</h4>
         <dl className="mt-2 grid grid-cols-2 gap-2">
           <Stat label="dependent pkgs" value={v.blastRadius.dependentPackages} />
           <Stat label="paths" value={v.blastRadius.dependencyPaths} />
           <Stat label="direct" value={v.blastRadius.directPaths} />
           <Stat label="transitive" value={v.blastRadius.transitivePaths} />
         </dl>
-        <button
-          onClick={() => onExploreBlast(v.key)}
-          disabled={mode === `blast:${v.key}`}
-          className={`mt-4 w-full border px-3 py-2 font-display text-sm font-medium transition-colors ${
-            mode === `blast:${v.key}`
-              ? "border-accent bg-accent text-white"
-              : "border-accent bg-transparent text-accent-ink hover:bg-accent-soft"
-          }`}
-        >
-          {mode === `blast:${v.key}` ? "Showing blast radius" : "View blast radius"}
-        </button>
+        <button onClick={() => onExploreBlast(v.key)} disabled={mode === `blast:${v.key}`} className={`mt-4 w-full border px-3 py-2 font-display text-sm font-medium transition-colors ${mode === `blast:${v.key}` ? "border-accent bg-accent text-white" : "border-accent bg-transparent text-accent-ink hover:bg-accent-soft"}`}>{mode === `blast:${v.key}` ? "Showing blast radius" : "View blast radius"}</button>
+
+        {(v.blastRadius.pathNodeIds.length > 0 || (v.dependencyPaths && v.dependencyPaths.length > 0)) && (
+          <div className="mt-4 border-t border-line pt-4">
+            <h4 className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">Dependency paths</h4>
+            <div className="mt-2 space-y-2">
+              {(v.blastRadius.pathNodeIds.length > 0 ? v.blastRadius.pathNodeIds : (v.dependencyPaths ?? [])).slice(0, 6).map((path, idx) => {
+                const labels = path.map((id) => {
+                  const n = analysis.nodes.find((x) => x.id === id);
+                  return n ? n.label : id.replace(/^.*:/, "").replace(/^.*--/, "");
+                });
+                const display = labels.join(" → ");
+                return (
+                  <div key={idx} className="border border-line bg-bg px-2.5 py-2">
+                    <p className="font-mono text-[11px] leading-relaxed text-ink">{display} <span className="text-accent">↘ {v.packageName}</span></p>
+                    <p className="mt-1 font-mono text-[10px] text-faint">{path.length} hops {v.blastRadius.pathNodeIds.length ? "" : "· from OSV"} </p>
+                  </div>
+                );
+              })}
+              {(v.blastRadius.pathNodeIds.length > 6 || (v.dependencyPaths && v.dependencyPaths.length > 6)) && <p className="font-mono text-[10px] text-faint">+{Math.max(v.blastRadius.pathNodeIds.length, v.dependencyPaths?.length ?? 0) - 6} more paths</p>}
+            </div>
+          </div>
+        )}
+
+        {(v.recommendedAction || v.runnableFixCommand) && (
+          <div className="mt-4 border-t border-line pt-4">
+            <h4 className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">Fix</h4>
+            {v.recommendedAction && <p className="mt-2 text-xs leading-relaxed text-muted">{v.recommendedAction}</p>}
+            {v.runnableFixCommand && (
+              <div className="mt-2 flex items-center gap-2 border border-line-strong bg-bg px-2.5 py-2">
+                <code className="flex-1 truncate font-mono text-[11px] text-ink">{v.runnableFixCommand}</code>
+                <button onClick={() => navigator.clipboard.writeText(v.runnableFixCommand!)} className="border border-line-strong bg-surface px-1.5 py-0.5 font-mono text-[10px] text-muted hover:text-ink">copy</button>
+              </div>
+            )}
+            {v.fixVersion && <p className="mt-2 font-mono text-[11px] text-muted">Target: <span className="font-semibold text-ink">{v.fixVersion}</span> — update within range then run install.</p>}
+          </div>
+        )}
+
+        <div className="mt-4 border-t border-line pt-4">
+          <h4 className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-faint">Files importing</h4>
+          {files.length > 0 ? (
+            <ul className="mt-2 space-y-1 font-mono text-xs text-muted">
+              {files.slice(0, 8).map((f) => (
+                <li key={`${f.file}:${f.line}`} className="truncate">→ {f.file} <span className="text-faint">L{f.line}</span></li>
+              ))}
+              {files.length > 8 && <li className="text-faint">+{files.length - 8} more</li>}
+            </ul>
+          ) : (
+            <p className="mt-2 font-mono text-xs text-faint">No direct file imports found. Reachable via transitive dependencies.</p>
+          )}
+          <p className="mt-3 text-[11px] leading-relaxed text-faint">File-level import reachability — not proof of execution.</p>
+        </div>
       </div>
     );
   }

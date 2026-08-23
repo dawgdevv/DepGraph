@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { GraphEdge, GraphNode } from "@/lib/demo-data";
+import type { GraphEdge, GraphNode } from "@/lib/graph";
 
 const NODE_W = 150;
 const NODE_H = 46;
@@ -55,6 +55,8 @@ export default function GraphCanvas({
     const pos = new Map<string, { x: number; y: number }>();
     let minX = Infinity;
     let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
     for (const [depth, colNodes] of [...cols.entries()].sort((a, b) => a[0] - b[0])) {
       colNodes.sort((a, b) => a.label.localeCompare(b.label));
       const colH = colNodes.length * NODE_H + (colNodes.length - 1) * V_GAP;
@@ -62,10 +64,14 @@ export default function GraphCanvas({
       minX = Math.min(minX, x);
       maxX = Math.max(maxX, x + NODE_W);
       colNodes.forEach((n, i) => {
-        pos.set(n.id, { x, y: -colH / 2 + i * (NODE_H + V_GAP) });
+        const y = -colH / 2 + i * (NODE_H + V_GAP);
+        pos.set(n.id, { x, y });
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y + NODE_H);
       });
     }
-    return { pos, minX, maxX };
+    if (!isFinite(minY)) { minY = -NODE_H / 2; maxY = NODE_H / 2; }
+    return { pos, minX, maxX, minY, maxY };
   }, [nodes]);
 
   const fit = useCallback((): Transform => {
@@ -74,9 +80,13 @@ export default function GraphCanvas({
     const w = el.clientWidth;
     const h = el.clientHeight;
     const bw = Math.max(layout.maxX - layout.minX, 1);
-    const k = clamp(Math.min(1.05, (w - 80) / bw), 0.35, 2.4);
+    const bh = Math.max(layout.maxY - layout.minY, 1);
+    const kx = (w - 80) / bw;
+    const ky = (h - 80) / bh;
+    const k = clamp(Math.min(1.05, kx, ky), 0.22, 2.4);
     const cx = (layout.minX + layout.maxX) / 2;
-    return { x: w / 2 - cx * k, y: h / 2, k };
+    const cy = (layout.minY + layout.maxY) / 2;
+    return { x: w / 2 - cx * k, y: h / 2 - cy * k, k };
   }, [layout]);
 
   function apply(smooth: boolean) {
@@ -312,6 +322,38 @@ function NodeBody({ n }: { n: GraphNode }) {
         <text x={32} y={NODE_H / 2 + 12} fontSize={9.5} fill="var(--accent-ink)" opacity={0.8} fontFamily="var(--font-mono)">
           {n.sub}
         </text>
+      </>
+    );
+  }
+  // Module group (collapsed packages)
+  if (n.id.startsWith("module:")) {
+    return (
+      <>
+        <rect width={NODE_W} height={NODE_H} rx={6} fill="var(--surface)" stroke="var(--link)" strokeWidth={1.5} />
+        <rect x={4} y={-3} width={NODE_W - 8} height={NODE_H} rx={6} fill="var(--surface)" stroke="var(--line-strong)" opacity={0.6} />
+        <rect width={NODE_W} height={NODE_H} rx={6} fill="var(--surface)" stroke="var(--link)" strokeWidth={1.5} />
+        <text x={12} y={NODE_H / 2 - 2} fontSize={12} fontWeight={600} fill="var(--ink)" fontFamily="var(--font-space)">
+          {trunc(n.label, 15)}
+        </text>
+        <text x={12} y={NODE_H / 2 + 12} fontSize={10} fill="var(--link)" fontFamily="var(--font-mono)">
+          {n.sub} ▸ expand
+        </text>
+      </>
+    );
+  }
+  if (n.id.startsWith("file-group:")) {
+    return (
+      <>
+        <rect width={NODE_W} height={NODE_H} rx={6} fill="var(--surface)" stroke="var(--line-strong)" strokeDasharray="6 3" />
+        <text x={28} y={NODE_H / 2 - 2} fontSize={11} fontWeight={500} fill="var(--ink)" fontFamily="var(--font-mono)">
+          {trunc(n.label, 16)}
+        </text>
+        <text x={28} y={NODE_H / 2 + 12} fontSize={9} fill="var(--faint)" fontFamily="var(--font-mono)">
+          {trunc(n.sub ?? "", 18)}
+        </text>
+        <g transform={`translate(10, ${NODE_H / 2 - 6})`}>
+          <path d="M2 2 H7 L9 5 H12 V12 H2 Z" fill="var(--bg)" stroke="var(--faint)" strokeWidth={1.2} />
+        </g>
       </>
     );
   }

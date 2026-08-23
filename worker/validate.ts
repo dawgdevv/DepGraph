@@ -1,5 +1,6 @@
 import { stat } from "node:fs/promises";
 import path from "node:path";
+import { spawn } from "node:child_process";
 
 export class ValidationError extends Error {
   constructor(message: string) {
@@ -17,9 +18,56 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
+async function tryGenerateLockfile(repoDir: string): Promise<boolean> {
+  const lockPath = path.join(repoDir, "package-lock.json");
+  if (await exists(lockPath)) return true;
+
+  console.log(`[validate] package-lock.json missing — generating via npm install --package-lock-only ...`);
+  const ok = await new Promise<boolean>((resolve) => {
+    const child = spawn("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], {
+      shell: false,
+      cwd: repoDir,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let stderr = "";
+    child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
+    const timer = setTimeout(() => {
+      try {
+        child.kill("SIGTERM");
+      } catch {}
+      setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {}
+      }, 2000);
+    }, 60_000);
+
+    child.on("error", () => {
+      clearTimeout(timer);
+      resolve(false);
+    });
+    child.on("close", async (code: number | null) => {
+      clearTimeout(timer);
+      if (code === 0 && (await exists(lockPath))) {
+        console.log(`[validate] lockfile generated successfully`);
+        resolve(true);
+      } else {
+        if (stderr) console.warn(`[validate] npm lockfile generation failed: ${stderr.slice(0, 500)}`);
+        resolve(false);
+      }
+    });
+  });
+
+  return ok;
+}
+
 /**
  * Validate repository contains required npm files.
- * Throws ValidationError with PRD-spec human-readable copy.
+ * - package.json must exist (hard fail).
+ * - package-lock.json: try to generate via npm if missing (build project file).
+ *   If generation fails, allow fallback to package.json-only parsing (no throw) so
+ *   analysis can still produce direct deps graph. parse-lockfile handles fallback.
  */
 export async function validateRepository(repoDir: string): Promise<void> {
   const pkgPath = path.join(repoDir, "package.json");
@@ -34,8 +82,15 @@ export async function validateRepository(repoDir: string): Promise<void> {
 
   const hasLock = await exists(lockPath);
   if (!hasLock) {
-    throw new ValidationError(
-      "package-lock.json not found. The npm lockfile is required to build the resolved dependency graph."
+    const generated = await tryGenerateLockfile(repoDir);
+    if (generated) return;
+    // Keep PRD copy as fallback but don't hard-fail if we can use package.json-only mode
+    // Throw only if caller wants strict mode — we now allow parse-lockfile to fallback
+    // So we log and return instead of throwing
+    console.warn(
+      `[validate] package-lock.json not found and generation failed — falling back to package.json-only parsing (direct deps only)`
     );
+    // Do NOT throw; parseLockfile will build fallback graph
+    return;
   }
 }

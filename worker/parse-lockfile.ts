@@ -22,18 +22,68 @@ export async function parseLockfile(
   repoDir: string
 ): Promise<ParseLockfileResult> {
   const pkgJsonRaw = await readFile(path.join(repoDir, "package.json"), "utf8");
-  const lockRaw = await readFile(
-    path.join(repoDir, "package-lock.json"),
-    "utf8"
-  );
-
   let pkgJson: Record<string, unknown>;
-  let lock: Record<string, unknown>;
   try {
     pkgJson = JSON.parse(pkgJsonRaw) as Record<string, unknown>;
   } catch {
     throw new Error("package.json is not valid JSON.");
   }
+
+  // Try to read lockfile; if missing (validate fallback) build graph from package.json only
+  let lockRaw: string | null = null;
+  try {
+    lockRaw = await readFile(path.join(repoDir, "package-lock.json"), "utf8");
+  } catch {
+    lockRaw = null;
+  }
+
+  if (lockRaw === null) {
+    // Fallback: package.json-only (direct deps only, no transitive resolution)
+    const directNames = new Set<string>();
+    for (const field of ["dependencies", "devDependencies", "optionalDependencies"]) {
+      const v = pkgJson[field];
+      if (v && typeof v === "object") {
+        for (const k of Object.keys(v as Record<string, unknown>)) directNames.add(k);
+      }
+    }
+    const depMap = (pkgJson["dependencies"] as Record<string, string> | undefined) ?? {};
+    const packages: PackageRecord[] = [];
+    for (const [name, range] of Object.entries(depMap)) {
+      // Use range as version placeholder; real resolved version unknown without lockfile
+      const version = String(range).replace(/^[\^~>=<\s]+/, "") || "0.0.0";
+      packages.push({
+        id: `${name}@${version}`,
+        name,
+        version,
+        isDirect: true,
+        dependencies: [],
+        lockKey: `node_modules/${name}`,
+      });
+    }
+    // Include devDependencies as direct too (if not already)
+    const devMap = (pkgJson["devDependencies"] as Record<string, string> | undefined) ?? {};
+    for (const [name, range] of Object.entries(devMap)) {
+      if (directNames.has(name) && packages.some((p) => p.name === name)) continue;
+      const version = String(range).replace(/^[\^~>=<\s]+/, "") || "0.0.0";
+      packages.push({
+        id: `${name}@${version}`,
+        name,
+        version,
+        isDirect: true,
+        dependencies: [],
+        lockKey: `node_modules/${name}`,
+      });
+    }
+    const directCount = packages.filter((p) => p.isDirect).length;
+    return {
+      packages,
+      totalCount: packages.length,
+      directCount,
+      transitiveCount: 0,
+    };
+  }
+
+  let lock: Record<string, unknown>;
   try {
     lock = JSON.parse(lockRaw) as Record<string, unknown>;
   } catch {

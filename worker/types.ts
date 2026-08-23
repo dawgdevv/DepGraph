@@ -20,6 +20,14 @@ export type VulnerabilityFinding = {
   severity: string;
   identifier?: string;
   affectedRange?: string;
+  summary?: string;
+  fixVersion?: string;
+  cves?: string[];
+  dependencyPaths?: string[][];
+  primaryParent?: string;
+  recommendedAction?: string;
+  runnableFixCommand?: string;
+  relationship?: string;
 };
 
 export type FileImport = {

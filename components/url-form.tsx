@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { parseGithubInput, toSlug } from "@/lib/github";
+import { parseGithubInput } from "@/lib/github";
 
 export function UrlForm() {
   const router = useRouter();
@@ -10,7 +10,7 @@ export function UrlForm() {
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
-  function submit(e: React.FormEvent) {
+  async function submit(e: React.FormEvent) {
     e.preventDefault();
     const parsed = parseGithubInput(url);
     if (!parsed) {
@@ -19,7 +19,31 @@ export function UrlForm() {
     }
     setError(null);
     setPending(true);
-    router.push(`/analysis/${toSlug(parsed.owner, parsed.repo)}`);
+    try {
+      const res = await fetch("/api/analyses", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryUrl: url }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        analysisId?: string;
+        analysisUrl?: string;
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error ?? "We couldn't start the analysis.");
+        return;
+      }
+      const target =
+        data.analysisUrl ??
+        (data.analysisId ? `/analysis/${data.analysisId}` : null);
+      if (target) router.push(target);
+      else setError("We couldn't start the analysis.");
+    } catch {
+      setError("The analysis service is temporarily unavailable. Please try again.");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
@@ -60,16 +84,7 @@ export function UrlForm() {
         >
           {error ?? "Public repositories · npm projects with package-lock.json"}
         </p>
-        <button
-          type="button"
-          onClick={() => {
-            setUrl("https://github.com/demo-labs/my-next-app");
-            setError(null);
-          }}
-          className="shrink-0 font-mono text-xs text-link underline-offset-4 hover:underline"
-        >
-          try an example →
-        </button>
+        <span className="shrink-0 font-mono text-xs text-faint">Paste a GitHub URL to start</span>
       </div>
     </form>
   );

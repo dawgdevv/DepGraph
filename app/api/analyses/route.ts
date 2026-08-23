@@ -1,5 +1,6 @@
 import { createAnalysis } from "@/lib/analysis-store";
 import { parseGithubInput, toGithubUrl } from "@/lib/github";
+import { getWorkerConfig, workerHeaders } from "@/lib/worker-client";
 
 function shortId(): string {
   return crypto.randomUUID().replace(/-/g, "").slice(0, 12);
@@ -10,10 +11,7 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
   } catch {
-    return Response.json(
-      { error: "Request body must be JSON." },
-      { status: 400 }
-    );
+    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
   }
 
   const raw =
@@ -37,6 +35,31 @@ export async function POST(request: Request) {
     );
   }
 
+  // If WORKER_URL is set (Vercel → VPS), delegate to worker service.
+  const workerCfg = getWorkerConfig();
+  if (workerCfg) {
+    try {
+      const target = `${workerCfg.url}/analyses`;
+      const res = await fetch(target, {
+        method: "POST",
+        headers: workerHeaders(workerCfg.token),
+        body: JSON.stringify({ repositoryUrl: raw }),
+        // 15s timeout via AbortSignal
+        signal: AbortSignal.timeout(15_000),
+      });
+      const data = await res.json().catch(() => ({}));
+      // Pass through status + body; normalize fields for client
+      return Response.json(data, { status: res.status });
+    } catch (err) {
+      const msg =
+        err instanceof Error && err.name === "TimeoutError"
+          ? "The analysis service is temporarily unavailable. Please try again."
+          : "The analysis service is temporarily unavailable. Please try again.";
+      return Response.json({ error: msg }, { status: 502 });
+    }
+  }
+
+  // Local fallback: in-process worker (dev / no WORKER_URL)
   const id = shortId();
   const repositoryUrl = toGithubUrl(`${parsed.owner}/${parsed.repo}`);
 
@@ -54,7 +77,7 @@ export async function POST(request: Request) {
       analysisId: id,
       repositoryUrl,
       statusUrl: `/api/analyses/${id}`,
-      analysisUrl: `/analysis/${parsed.owner}--${parsed.repo}`,
+      analysisUrl: `/analysis/${id}`,
       status: "queued",
     },
     { status: 201 }

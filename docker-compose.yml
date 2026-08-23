@@ -1,0 +1,14 @@
+services:
+  worker:
+    build:
+      context: .
+      dockerfile: services/worker/Dockerfile
+    env_file: services/worker/.env
+    ports:
+      - "3001:3001"
+    volumes:
+      - worker-data:/data
+    restart: unless-stopped
+
+volumes:
+  worker-data:
