@@ -19,9 +19,18 @@ export default function Home() {
             DepGraph
           </span>
         </div>
-        <p className="hidden font-mono text-xs text-faint sm:block">
-          npm · lockfile v3 · CVE-Lite
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="hidden font-mono text-xs text-faint sm:block">
+            npm · lockfile v3
+          </p>
+          <span className="hidden items-center gap-1.5 border border-line-strong bg-surface px-2 py-1 font-mono text-[10px] uppercase tracking-[0.12em] text-muted sm:flex">
+            <svg width="9" height="9" viewBox="0 0 10 10" aria-hidden>
+              <ellipse cx="5" cy="2.4" rx="4" ry="1.7" fill="none" stroke="var(--link)" strokeWidth="1.1" />
+              <path d="M1 2.4 V7.6 A4 1.7 0 0 0 9 7.6 V2.4" fill="none" stroke="var(--link)" strokeWidth="1.1" />
+            </svg>
+            powered by CognoDB
+          </span>
+        </div>
       </header>
 
       <section className="relative z-10 mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center px-6 pb-24">
