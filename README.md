@@ -18,7 +18,7 @@ DepGraph takes a public GitHub URL, resolves the real npm tree, scans it with CV
   <br/>
   <em>Whole flow: paste URL → analyze → blast radius → paths → files (2 min) — click frame to play</em>
   <br/>
-  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing">▶ Open in Drive</a> · ensure <code>Anyone with link → Viewer</code> · GitHub README shows thumbnail, not auto-play iframe
+  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing">▶ Open in Drive</a>
 </p>
 
 ```
