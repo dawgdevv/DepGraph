@@ -12,12 +12,13 @@ DepGraph takes a public GitHub URL, resolves the real npm tree, scans it with CV
 > **2-minute walkthrough — blast radius in one click**
 
 <p align="center">
-  <!-- Replace with your recording -->
-  <a href="https://www.youtube.com/watch?v=REPLACE_ME">
-    <img src="https://via.placeholder.com/800x450?text=Demo+Video+Placeholder+%28click+to+add+YouTube+link%29" alt="DepGraph demo video placeholder" width="800"/>
+  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing" target="_blank">
+    <img src="https://via.placeholder.com/800x450?text=►+Click+to+Watch+Demo+-+2+min" alt="DepGraph demo — whole flow" width="800"/>
   </a>
   <br/>
-  <em>Click to add video — shows: paste URL → analyze → blast radius → path inspect</em>
+  <em>Whole flow: paste URL → analyze → blast radius → paths → files (2 min)</em>
+  <br/>
+  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing">Open in Drive</a> · make sure sharing is <code>Anyone with link → Viewer</code>
 </p>
 
 ```
