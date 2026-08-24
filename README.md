@@ -13,12 +13,12 @@ DepGraph takes a public GitHub URL, resolves the real npm tree, scans it with CV
 
 <p align="center">
   <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing" target="_blank">
-    <img src="https://via.placeholder.com/800x450?text=►+Click+to+Watch+Demo+-+2+min" alt="DepGraph demo — whole flow" width="800"/>
+    <img src="https://drive.google.com/thumbnail?id=19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2&sz=w800" alt="DepGraph demo — whole flow (click to play)" width="800" style="border:1px solid #e5e7eb; border-radius: 8px;"/>
   </a>
   <br/>
-  <em>Whole flow: paste URL → analyze → blast radius → paths → files (2 min)</em>
+  <em>Whole flow: paste URL → analyze → blast radius → paths → files (2 min) — click frame to play</em>
   <br/>
-  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing">Open in Drive</a> · make sure sharing is <code>Anyone with link → Viewer</code>
+  <a href="https://drive.google.com/file/d/19fZYDzhTIHg4bkuIBXnH8DTXu10gkXE2/view?usp=sharing">▶ Open in Drive</a> · ensure <code>Anyone with link → Viewer</code> · GitHub README shows thumbnail, not auto-play iframe
 </p>
 
 ```
