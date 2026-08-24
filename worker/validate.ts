@@ -18,18 +18,13 @@ async function exists(p: string): Promise<boolean> {
   }
 }
 
-async function tryGenerateLockfile(repoDir: string): Promise<boolean> {
-  const lockPath = path.join(repoDir, "package-lock.json");
-  if (await exists(lockPath)) return true;
-
-  console.log(`[validate] package-lock.json missing — generating via npm install --package-lock-only ...`);
-  const ok = await new Promise<boolean>((resolve) => {
-    const child = spawn("npm", ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], {
+async function runNpm(repoDir: string, args: string[], lockPath: string): Promise<{ ok: boolean; stderr: string }> {
+  return await new Promise<{ ok: boolean; stderr: string }>((resolve) => {
+    const child = spawn("npm", args, {
       shell: false,
       cwd: repoDir,
       stdio: ["ignore", "pipe", "pipe"],
     });
-
     let stderr = "";
     child.stderr?.on("data", (d: Buffer) => (stderr += d.toString()));
     const timer = setTimeout(() => {
@@ -42,24 +37,44 @@ async function tryGenerateLockfile(repoDir: string): Promise<boolean> {
         } catch {}
       }, 2000);
     }, 60_000);
-
     child.on("error", () => {
       clearTimeout(timer);
-      resolve(false);
+      resolve({ ok: false, stderr });
     });
     child.on("close", async (code: number | null) => {
       clearTimeout(timer);
       if (code === 0 && (await exists(lockPath))) {
-        console.log(`[validate] lockfile generated successfully`);
-        resolve(true);
+        resolve({ ok: true, stderr });
       } else {
-        if (stderr) console.warn(`[validate] npm lockfile generation failed: ${stderr.slice(0, 500)}`);
-        resolve(false);
+        resolve({ ok: false, stderr });
       }
     });
   });
+}
 
-  return ok;
+async function tryGenerateLockfile(repoDir: string): Promise<boolean> {
+  const lockPath = path.join(repoDir, "package-lock.json");
+  if (await exists(lockPath)) return true;
+
+  console.log(`[validate] package-lock.json missing — generating via npm install --package-lock-only ...`);
+  let res = await runNpm(repoDir, ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund"], lockPath);
+  if (res.ok) {
+    console.log(`[validate] lockfile generated successfully`);
+    return true;
+  }
+  if (res.stderr) console.warn(`[validate] npm lockfile generation failed: ${res.stderr.slice(0, 600)}`);
+
+  // Retry with legacy peer deps for ERESOLVE workspaces like @deta/editor (svelte 5)
+  if (res.stderr.includes("ERESOLVE") || res.stderr.includes("unable to resolve dependency tree")) {
+    console.log(`[validate] retrying with --legacy-peer-deps ...`);
+    res = await runNpm(repoDir, ["install", "--package-lock-only", "--ignore-scripts", "--no-audit", "--no-fund", "--legacy-peer-deps"], lockPath);
+    if (res.ok) {
+      console.log(`[validate] lockfile generated with --legacy-peer-deps`);
+      return true;
+    }
+    if (res.stderr) console.warn(`[validate] retry failed: ${res.stderr.slice(0, 600)}`);
+  }
+  return false;
 }
 
 /**

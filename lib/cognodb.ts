@@ -23,9 +23,9 @@ export function getDriver(): Driver {
     );
   }
   driver = neo4j.driver(env.uri, neo4j.auth.basic(env.username, env.password), {
-    // bolt+s already enables encryption; keep defaults.
-    // Add connection timeout to fail fast for worker (5s)
-    connectionTimeout: 10_000,
+    connectionTimeout: 60_000,
+    connectionAcquisitionTimeout: 60_000,
+    maxTransactionRetryTime: 60_000,
   });
   return driver;
 }

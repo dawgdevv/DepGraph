@@ -15,7 +15,6 @@ export type WriteGraphResult = {
   affectedPaths: number;
 };
 
-// Ensure uniqueness constraints once per process (idempotent)
 let constraintsEnsured = false;
 async function ensureConstraints(): Promise<void> {
   if (constraintsEnsured) return;
@@ -29,43 +28,32 @@ async function ensureConstraints(): Promise<void> {
   for (const cypher of statements) {
     try {
       await session.run(cypher);
-    } catch {
-      // ignore — CognoDB may not support or already exists
-    }
+    } catch {}
   }
   await session.close().catch(() => {});
   constraintsEnsured = true;
 }
 
-/**
- * Step 5: Build graph in CognoDB.
- * Scoped to analysisId for isolation and idempotency.
- * Parameterized Cypher only.
- */
 export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResult> {
   const { analysisId, projectName, repositoryUrl, repoPath, packages, vulnerabilities, fileImports } = input;
 
-  // If CognoDB env not set, skip gracefully (local dev without DB)
-  const hasEnv =
-    !!process.env.COGNODB_URI || !!process.env.NEO4J_URI;
+  const hasEnv = !!process.env.COGNODB_URI || !!process.env.NEO4J_URI;
   if (!hasEnv) {
     console.warn("[writeGraph] COGNODB_URI not set — skipping graph write (local dev)");
     return { affectedPaths: 0 };
   }
 
   await ensureConstraints();
+  const limitedFileImports = fileImports.length > 150 ? fileImports.slice(0, 150) : fileImports;
 
   const session = getSession();
   try {
-    await session.executeWrite(async (tx) => {
-      // 0. Cleanup previous run for this analysisId (DETACH DELETE)
-      await tx.run("MATCH (n {analysisId: $analysisId}) DETACH DELETE n", {
-        analysisId,
-      });
+    // 0. Cleanup — own transaction
+    await session.run("MATCH (n {analysisId: $analysisId}) DETACH DELETE n", { analysisId });
 
-      // 1. Project
-      await tx.run(
-        `
+    // 1. Project
+    await session.run(
+      `
         MERGE (p:Project {id: $projectId})
         SET p.name = $projectName,
             p.analysisId = $analysisId,
@@ -73,21 +61,19 @@ export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResu
             p.repoPath = $repoPath,
             p.createdAt = datetime()
         `,
-        { projectId: analysisId, projectName, analysisId, repositoryUrl: repositoryUrl ?? null, repoPath: repoPath ?? null }
-      );
+      { projectId: analysisId, projectName, analysisId, repositoryUrl: repositoryUrl ?? null, repoPath: repoPath ?? null }
+    );
 
-      if (packages.length > 0) {
-        const pkgRows = packages.map((pkg) => ({
-          pkgId: `${analysisId}:${pkg.id}`,
-          name: pkg.name,
-          version: pkg.version,
-          isDirect: pkg.isDirect,
-          lockKey: pkg.lockKey,
-        }));
-
-        // 2. Packages + Project->Package for direct
-        await tx.run(
-          `
+    if (packages.length > 0) {
+      const pkgRows = packages.map((pkg) => ({
+        pkgId: `${analysisId}:${pkg.id}`,
+        name: pkg.name,
+        version: pkg.version,
+        isDirect: pkg.isDirect,
+        lockKey: pkg.lockKey,
+      }));
+      await session.run(
+        `
           UNWIND $rows AS row
           MERGE (pkg:Package {id: row.pkgId})
           SET pkg.name = row.name,
@@ -100,50 +86,51 @@ export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResu
           WHERE row.isDirect = true
           MERGE (proj)-[:DEPENDS_ON]->(pkg)
           `,
-          { rows: pkgRows, analysisId, projectId: analysisId }
-        );
+        { rows: pkgRows, analysisId, projectId: analysisId }
+      );
 
-        // 3. Package -> Package DEPENDS_ON
-        const depRows: Array<{ sourceId: string; depName: string }> = [];
-        for (const pkg of packages) {
-          const sourceId = `${analysisId}:${pkg.id}`;
-          for (const depName of pkg.dependencies) {
-            depRows.push({ sourceId, depName });
-          }
-        }
-        if (depRows.length > 0) {
-          await tx.run(
+      const depRows: Array<{ sourceId: string; depName: string }> = [];
+      for (const pkg of packages) {
+        const sourceId = `${analysisId}:${pkg.id}`;
+        for (const depName of pkg.dependencies) depRows.push({ sourceId, depName });
+      }
+      if (depRows.length > 0) {
+        // chunk to avoid large payload deadline
+        const chunkSize = 200;
+        for (let i = 0; i < depRows.length; i += chunkSize) {
+          const chunk = depRows.slice(i, i + chunkSize);
+          await session.run(
             `
             UNWIND $rows AS row
             MATCH (src:Package {id: row.sourceId})
             MATCH (dst:Package {analysisId: $analysisId, name: row.depName})
             MERGE (src)-[:DEPENDS_ON]->(dst)
             `,
-            { rows: depRows, analysisId }
+            { rows: chunk, analysisId }
           );
         }
       }
+    }
 
-      // 4. Vulnerabilities + Package->HAS_VULNERABILITY
-      if (vulnerabilities.length > 0) {
-        const vulnRows = vulnerabilities.map((v, i) => ({
-          vulnId: `${analysisId}:vuln:${v.packageName}@${v.installedVersion}:${v.identifier ?? v.severity}:${i}`,
-          packageName: v.packageName,
-          installedVersion: v.installedVersion,
-          severity: v.severity,
-          identifier: v.identifier ?? null,
-          affectedRange: v.affectedRange ?? null,
-          summary: v.summary ?? null,
-          fixVersion: v.fixVersion ?? null,
-          cves: v.cves ?? null,
-          primaryParent: v.primaryParent ?? null,
-          recommendedAction: v.recommendedAction ?? null,
-          runnableFixCommand: v.runnableFixCommand ?? null,
-          relationship: v.relationship ?? null,
-          dependencyPaths: v.dependencyPaths ? JSON.stringify(v.dependencyPaths) : null,
-        }));
-        await tx.run(
-          `
+    if (vulnerabilities.length > 0) {
+      const vulnRows = vulnerabilities.map((v, i) => ({
+        vulnId: `${analysisId}:vuln:${v.packageName}@${v.installedVersion}:${v.identifier ?? v.severity}:${i}`,
+        packageName: v.packageName,
+        installedVersion: v.installedVersion,
+        severity: v.severity,
+        identifier: v.identifier ?? null,
+        affectedRange: v.affectedRange ?? null,
+        summary: v.summary ?? null,
+        fixVersion: v.fixVersion ?? null,
+        cves: v.cves ?? null,
+        primaryParent: v.primaryParent ?? null,
+        recommendedAction: v.recommendedAction ?? null,
+        runnableFixCommand: v.runnableFixCommand ?? null,
+        relationship: v.relationship ?? null,
+        dependencyPaths: v.dependencyPaths ? JSON.stringify(v.dependencyPaths) : null,
+      }));
+      await session.run(
+        `
           UNWIND $rows AS row
           MERGE (v:Vulnerability {id: row.vulnId})
           SET v.packageName = row.packageName,
@@ -164,33 +151,29 @@ export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResu
           MATCH (pkg:Package {analysisId: $analysisId, name: row.packageName, version: row.installedVersion})
           MERGE (pkg)-[:HAS_VULNERABILITY]->(v)
           `,
-          { rows: vulnRows, analysisId }
-        );
-
-        // Fallback: if version didn't match (dedup edge), match by name only
-        await tx.run(
-          `
+        { rows: vulnRows, analysisId }
+      );
+      await session.run(
+        `
           UNWIND $rows AS row
           MATCH (v:Vulnerability {id: row.vulnId})
           WHERE NOT EXISTS { MATCH (pkg:Package)-[:HAS_VULNERABILITY]->(v) }
           MATCH (pkg:Package {analysisId: $analysisId, name: row.packageName})
           MERGE (pkg)-[:HAS_VULNERABILITY]->(v)
           `,
-          { rows: vulnRows, analysisId }
-        );
-      }
+        { rows: vulnRows, analysisId }
+      );
+    }
 
-      // 5. Files + Project CONTAINS + File IMPORTS Package
-      if (fileImports.length > 0) {
-        // Unique files
-        const fileMap = new Map<string, string>();
-        for (const fi of fileImports) fileMap.set(fi.filePath, fi.filePath);
-        const fileRows = [...fileMap.entries()].map(([filePath]) => ({
-          fileId: `${analysisId}:file:${filePath}`,
-          filePath,
-        }));
-        await tx.run(
-          `
+    if (limitedFileImports.length > 0) {
+      const fileMap = new Map<string, string>();
+      for (const fi of limitedFileImports) fileMap.set(fi.filePath, fi.filePath);
+      const fileRows = [...fileMap.entries()].map(([filePath]) => ({
+        fileId: `${analysisId}:file:${filePath}`,
+        filePath,
+      }));
+      await session.run(
+        `
           UNWIND $rows AS row
           MERGE (f:File {id: row.fileId})
           SET f.path = row.filePath,
@@ -199,28 +182,30 @@ export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResu
           MATCH (proj:Project {id: $projectId})
           MERGE (proj)-[:CONTAINS]->(f)
           `,
-          { rows: fileRows, analysisId, projectId: analysisId }
-        );
-
-        const importRows = fileImports.map((fi) => ({
-          fileId: `${analysisId}:file:${fi.filePath}`,
-          packageName: fi.packageName,
-          importType: fi.importType,
-          line: fi.line,
-        }));
-        await tx.run(
+        { rows: fileRows, analysisId, projectId: analysisId }
+      );
+      const importRows = limitedFileImports.map((fi) => ({
+        fileId: `${analysisId}:file:${fi.filePath}`,
+        packageName: fi.packageName,
+        importType: fi.importType,
+        line: fi.line,
+      }));
+      // chunk imports too
+      const chunkSize = 200;
+      for (let i = 0; i < importRows.length; i += chunkSize) {
+        const chunk = importRows.slice(i, i + chunkSize);
+        await session.run(
           `
           UNWIND $rows AS row
           MATCH (f:File {id: row.fileId})
           MATCH (pkg:Package {analysisId: $analysisId, name: row.packageName})
           MERGE (f)-[r:IMPORTS {line: row.line, importType: row.importType}]->(pkg)
           `,
-          { rows: importRows, analysisId }
+          { rows: chunk, analysisId }
         );
       }
-    });
+    }
 
-    // 6. Calculate affectedPaths: count distinct paths from Project to any vulnerable Package
     let affectedPaths = 0;
     try {
       const res = await session.run(
@@ -235,22 +220,23 @@ export async function writeGraph(input: WriteGraphInput): Promise<WriteGraphResu
       );
       const row = res.records[0];
       affectedPaths = row ? (row.get("cnt") as unknown as { toNumber?: () => number; low?: number }) as unknown as number : 0;
-      // neo4j Integer handling
       if (affectedPaths && typeof (affectedPaths as unknown as { toNumber: () => number }).toNumber === "function") {
         affectedPaths = (affectedPaths as unknown as { toNumber: () => number }).toNumber();
       } else if (affectedPaths && typeof (affectedPaths as unknown as { low: number }).low === "number") {
         affectedPaths = (affectedPaths as unknown as { low: number }).low;
       }
     } catch {
-      affectedPaths = vulnerabilities.length > 0 ? 0 : 0;
+      affectedPaths = 0;
     }
 
     return { affectedPaths };
   } catch (err) {
-    // Map driver errors to PRD copy
     const msg = err instanceof Error ? err.message : String(err);
-    // Don't leak driver details
     console.error("[writeGraph] CognoDB error:", msg);
+    if (msg.includes("deadline exceeded") || msg.includes("timeout") || msg.includes("Connection") || msg.includes("ServiceUnavailable") || msg.includes("TransientError")) {
+      console.warn("[writeGraph] transient CognoDB error — analysis will complete without graph, /api/graph will 404");
+      return { affectedPaths: 0 };
+    }
     throw new Error("The dependency graph is temporarily unavailable. Please try again.");
   } finally {
     await session.close().catch(() => {});
