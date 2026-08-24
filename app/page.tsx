@@ -16,7 +16,7 @@ export default function Home() {
         <div className="flex items-center gap-2.5">
           <Mark />
           <span className="font-display text-lg font-semibold tracking-tight">
-            DepGraph
+            DepGraph ( for npm ecosystem)
           </span>
         </div>
         <div className="flex items-center gap-3">
