@@ -8,7 +8,7 @@ import { DetailsPanel, LeftPanel, useHighlightSets } from "./panels";
 
 const FILE_GROUP_THRESHOLD = 40;
 const FILE_GROUP_MAX_GROUPS = 12;
-const PKG_GROUP_THRESHOLD = 50;
+const PKG_GROUP_THRESHOLD = 999999; // disabled — file based only per request
 
 function dirOf(filePath: string): string {
   const parts = filePath.split("/").filter(Boolean);
