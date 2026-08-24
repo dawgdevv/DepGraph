@@ -1,4 +1,4 @@
-# DepGraph
+# DepGraph ( For npm ecosystem specifically Javascript and TypeScript repos)
 ### See exactly what depends on a vulnerable package.
 
 DepGraph takes a public GitHub URL, resolves the real npm tree, scans it with CVE-Lite, and shows — in a graph — how each vulnerability reaches your app.
